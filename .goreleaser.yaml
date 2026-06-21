@@ -1,0 +1,111 @@
+# goreleaser config for the moltable CLI.
+#
+# CLI lives in its own repo (moltable/cli) so this config sits at
+# the repo root and targets the same directory. Tagged releases use the
+# `v*` prefix (e.g. `v0.1.0`) — that prefix is what GH Actions
+# (`.github/workflows/release.yml`) listens for. Other tag prefixes are
+# ignored so a stray `v0.1.0` tag won't accidentally re-cut a release.
+#
+# Local dry-run:
+#   make release-dry-run
+# (Equivalent to `goreleaser release --snapshot --clean` from the root.)
+#
+# Two -X ldflags are set on the version variable:
+#   - main.version (used by Kong help text via the `${version}` var)
+#   - internal/version.BinaryVersion (used by the updater's
+#     MinServerVersion compare and `moltable version --json`)
+# Setting both is harmless: -X against a missing symbol is silently
+# dropped by the linker.
+
+version: 2
+
+project_name: moltable
+
+# Tag-to-version handling: every template that renders a version
+# (ldflags, archive name_template, release name_template) explicitly
+# strips the `v` prefix via `{{ trimprefix .Tag "v" }}`. That
+# is the source of truth — no top-level git/version config needed.
+# The CLI tag prefix exists so the GH Actions workflow can scope its
+# trigger to `v*` and ignore any unrelated `v*` tags that ever
+# land on the repo.
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: moltable
+    main: ./cmd/moltable
+    binary: moltable
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 isn't a meaningful target for the CLI today;
+      # most Windows-on-arm users run amd64 binaries under emulation.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ trimprefix .Tag "v" }}
+      - -X github.com/moltable/cli/internal/version.BinaryVersion={{ trimprefix .Tag "v" }}
+      # Git commit + build date for `moltable version --json`. Lets a
+      # support thread identify the exact build from a single command,
+      # matching how the API server surfaces RAILWAY_GIT_COMMIT_SHA via
+      # X-Moltable-Version. {{.ShortCommit}} is the 7-char SHA, {{.Date}}
+      # is goreleaser's ISO-8601 UTC build timestamp.
+      - -X github.com/moltable/cli/internal/version.BinaryCommit={{.ShortCommit}}
+      - -X github.com/moltable/cli/internal/version.BinaryBuildDate={{.Date}}
+
+archives:
+  - id: moltable
+    ids:
+      - moltable
+    name_template: 'moltable_{{ trimprefix .Tag "v" }}_{{ .Os }}_{{ .Arch }}'
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE*
+      - README.md
+      - skills/**/*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+release:
+  github:
+    owner: Moltable
+    name: cli
+  prerelease: auto
+  name_template: 'moltable {{ trimprefix .Tag "v" }}'
+  header: |
+    ## moltable CLI {{ trimprefix .Tag "v" }}
+
+    Install with:
+
+    ```sh
+    curl -fsSL https://get.moltable.io | sh
+    ```
+
+    Or grab a binary directly from the assets below and drop it on your `$PATH`.
+
+snapshot:
+  name_template: "{{ .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "Merge pull request"

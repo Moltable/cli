@@ -1,0 +1,24 @@
+# goreleaser output
+/dist/
+
+# Local builds
+/moltable
+/bin/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+*.out
+coverage.txt
+
+# Local env / secrets — should never live in this public repo
+.env
+.env.*
+!.env.example

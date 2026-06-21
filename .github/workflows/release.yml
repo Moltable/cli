@@ -1,0 +1,42 @@
+# Tag-triggered release for the moltable CLI.
+#
+# Tag prefix `v*` (e.g. `v0.1.0`) — that prefix is what
+# goreleaser strips when computing {{ .Version }} (see .goreleaser.yaml).
+# Other tag prefixes (e.g. a stray plain `v0.1.0`) are ignored so they
+# don't accidentally re-cut a CLI release.
+
+name: Release moltable CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    name: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
