@@ -1,0 +1,18 @@
+{
+  "name": "moltable",
+  "version": "0.1.1",
+  "description": "moltable Claude Code skills bundle — auth and profiles, enrichment-table recipes, run/watch job patterns, and long-tail fallback strategies. Installed by the moltable CLI via `moltable skills install`.",
+  "author": {
+    "name": "Moltable",
+    "url": "https://moltable.io"
+  },
+  "homepage": "https://moltable.io",
+  "repository": "https://github.com/Moltable/cli",
+  "keywords": [
+    "moltable",
+    "enrichment",
+    "table",
+    "data",
+    "cli"
+  ]
+}

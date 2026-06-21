@@ -38,6 +38,13 @@ import (
 // can drive it directly and inject a stub updater.Client.
 func runUpgrade(kctx *kong.Context, version string, checkOnly, jsonOut bool, jqExpr string) error {
 	client := updater.NewClient()
+	// Surface lifecycle milestones to stderr so `moltable upgrade`
+	// doesn't look hung for the ~5-15s download + verify takes.
+	// JSON-mode + check-only paths stay silent (no Apply call, or
+	// machine-readable output that shouldn't be mixed with prose).
+	if !checkOnly && !jsonOut {
+		client.Progress = kctx.Stderr
+	}
 	return runUpgradeWithClient(kctx, client, version, checkOnly, jsonOut, jqExpr)
 }
 

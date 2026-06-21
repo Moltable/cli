@@ -70,6 +70,16 @@ func (c *SkillsInstallCmd) Run(kctx *kong.Context) error {
 		return fmt.Errorf("skills install: create %s: %w", target, err)
 	}
 
+	// Write the plugin manifest at <plugin-root>/.claude-plugin/plugin.json
+	// before the skill files. Without this, Claude Code's plugin loader
+	// either skips the directory or loads the skills unnamespaced — the
+	// `/moltable:<skill>` invocation prefix depends on the manifest's
+	// `name` field. The plugin root is the parent of the skills target;
+	// `--target` overrides keep the same parent-of relationship.
+	if err := installManifest(target); err != nil {
+		return err
+	}
+
 	written, err := installSkills(target, files)
 	if err != nil {
 		return err
@@ -115,6 +125,14 @@ func (c *SkillsUninstallCmd) Run(kctx *kong.Context) error {
 	}
 	if err := os.RemoveAll(target); err != nil {
 		return fmt.Errorf("skills uninstall: remove %s: %w", target, err)
+	}
+	// Best-effort: also remove the sibling .claude-plugin/ manifest
+	// dir that installManifest wrote. Same parent-relationship rule
+	// as install. Don't fail uninstall on this — pre-manifest installs
+	// won't have it; user-customized layouts may not either.
+	manifestDir := filepath.Join(filepath.Dir(target), ".claude-plugin")
+	if info, err := os.Lstat(manifestDir); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		_ = os.RemoveAll(manifestDir)
 	}
 	if isTTY(kctx.Stderr) {
 		fmt.Fprintf(kctx.Stderr, "Removed %s.\n", target)
@@ -167,6 +185,42 @@ func guardNotSymlink(target string) error {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("skills: %s is a symbolic link; refusing to write through it. Pass --target to specify a real directory.", target)
+	}
+	return nil
+}
+
+// installManifest writes the embedded Claude Code plugin manifest
+// to <parent-of-skillsTarget>/.claude-plugin/plugin.json so Claude
+// Code's plugin loader registers the bundle under the `moltable:`
+// invocation prefix. Same atomic write-rename discipline as
+// installSkills; idempotent across re-runs.
+func installManifest(skillsTarget string) error {
+	pluginRoot := filepath.Dir(skillsTarget)
+	manifestDir := filepath.Join(pluginRoot, ".claude-plugin")
+	manifestPath := filepath.Join(manifestDir, "plugin.json")
+
+	// Refuse to write through a symlinked manifest dir for the same
+	// reason guardNotSymlink protects the skills target — don't
+	// silently mutate whatever the link points at.
+	if err := guardNotSymlink(manifestDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		return fmt.Errorf("skills install: create %s: %w", manifestDir, err)
+	}
+
+	body := cli.Manifest()
+	if len(body) == 0 {
+		return fmt.Errorf("skills install: embedded plugin manifest is empty; this is a build bug")
+	}
+
+	tmpPath := manifestPath + ".tmp"
+	if err := writeAtomic(tmpPath, body); err != nil {
+		return fmt.Errorf("skills install: write manifest: %w", err)
+	}
+	if err := os.Rename(tmpPath, manifestPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("skills install: install manifest: %w", err)
 	}
 	return nil
 }

@@ -110,6 +110,13 @@ type Client struct {
 	// Now is the clock — overridable in tests so cache-TTL logic is
 	// deterministic.
 	Now func() time.Time
+	// Progress is an optional sink that Apply writes human-readable
+	// milestones to (fetching release, downloading tarball, verifying,
+	// swapping). When nil Apply runs silently, preserving the current
+	// behavior for callers that don't set it. The CLI wires this to
+	// stderr so `moltable upgrade` shows lifecycle progress instead of
+	// looking hung during the ~5-15s download.
+	Progress io.Writer
 }
 
 // NewClient returns a Client populated with production defaults. Tests
@@ -184,6 +191,7 @@ func (c *Client) CheckLatest(ctx context.Context, currentVersion string) (Result
 func (c *Client) Apply(ctx context.Context, version, runtimeOS, runtimeArch string) error {
 	c.applyDefaults()
 
+	c.progressf("Fetching release info…\n")
 	rel, err := c.fetchRelease(ctx, version)
 	if err != nil {
 		return err
@@ -208,15 +216,18 @@ func (c *Client) Apply(ctx context.Context, version, runtimeOS, runtimeArch stri
 		return &AssetNotFoundError{Name: "checksums.txt", Tag: rel.TagName}
 	}
 
+	c.progressf("Downloading %s…\n", tarballName)
 	tarballBytes, err := c.downloadAsset(ctx, tarballURL)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", tarballName, err)
 	}
+	c.progressf("Downloading checksums.txt…\n")
 	checksumsBytes, err := c.downloadAsset(ctx, checksumsURL)
 	if err != nil {
 		return fmt.Errorf("download checksums.txt: %w", err)
 	}
 
+	c.progressf("Verifying sha256…\n")
 	wantHash, ok := findChecksum(checksumsBytes, tarballName)
 	if !ok {
 		return &VerifyError{Asset: tarballName, Reason: "no entry in checksums.txt"}
@@ -235,10 +246,23 @@ func (c *Client) Apply(ctx context.Context, version, runtimeOS, runtimeArch stri
 		return fmt.Errorf("extract moltable from %s: %w", tarballName, err)
 	}
 
+	c.progressf("Swapping binary…\n")
 	if err := goupdate.Apply(bytes.NewReader(binBytes), goupdate.Options{}); err != nil {
 		return fmt.Errorf("swap binary: %w", err)
 	}
+	c.progressf("Upgraded to %s.\n", resolvedTag)
 	return nil
+}
+
+// progressf writes a milestone line to the optional Progress sink.
+// No-op when Progress is nil (the default — preserves silence for
+// callers that don't opt in, like the background update-check
+// goroutine that has no terminal to write to).
+func (c *Client) progressf(format string, args ...any) {
+	if c.Progress == nil {
+		return
+	}
+	fmt.Fprintf(c.Progress, format, args...)
 }
 
 // canonicalReleaseTag turns whatever shape the caller supplies for a

@@ -233,3 +233,57 @@ func TestSkillsInstall_DefaultTargetUsesHomeDir(t *testing.T) {
 		t.Errorf("default install target has no entries")
 	}
 }
+
+// TestSkillsInstall_WritesPluginManifest pins the contract that
+// makes the `/moltable:<skill-name>` invocation prefix work:
+// Claude Code's plugin loader requires .claude-plugin/plugin.json
+// at the plugin root, with a `name` field. Without this file the
+// skills either don't load or load unnamespaced — both bad UX.
+// Manifest path is sibling-of-skills (parent/.claude-plugin/plugin.json).
+func TestSkillsInstall_WritesPluginManifest(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skills")
+	code, _, _ := runCLI(t, "skills", "install", "--target", target)
+	if code != 0 {
+		t.Fatalf("skills install exit code = %d; want 0", code)
+	}
+
+	manifestPath := filepath.Join(filepath.Dir(target), ".claude-plugin", "plugin.json")
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("manifest not written at %s: %v", manifestPath, err)
+	}
+	if len(body) == 0 {
+		t.Fatal("manifest is empty")
+	}
+	// Cheap shape check — must declare the plugin name so Claude
+	// Code namespaces skills as `/moltable:<skill>`. We don't parse
+	// JSON here; if the file shape ever drifts the embed test in
+	// embed_test.go catches the structural break.
+	if !bytes.Contains(body, []byte(`"name"`)) || !bytes.Contains(body, []byte(`"moltable"`)) {
+		t.Errorf("manifest at %s missing name=moltable; got %d bytes", manifestPath, len(body))
+	}
+}
+
+// TestSkillsUninstall_AlsoRemovesManifest pins the symmetry: install
+// writes both the skills dir AND the sibling .claude-plugin/, so
+// uninstall should clean both up. Otherwise a stale manifest lingers
+// in ~/.claude/plugins/moltable/ pointing at no skills.
+func TestSkillsUninstall_AlsoRemovesManifest(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skills")
+	code, _, _ := runCLI(t, "skills", "install", "--target", target)
+	if code != 0 {
+		t.Fatalf("install exit code = %d; want 0", code)
+	}
+	manifestDir := filepath.Join(filepath.Dir(target), ".claude-plugin")
+	if _, err := os.Stat(manifestDir); err != nil {
+		t.Fatalf("install did not create manifest dir: %v", err)
+	}
+
+	code, _, _ = runCLI(t, "skills", "uninstall", "--target", target, "--yes")
+	if code != 0 {
+		t.Fatalf("uninstall exit code = %d; want 0", code)
+	}
+	if _, err := os.Stat(manifestDir); !os.IsNotExist(err) {
+		t.Errorf("uninstall left manifest dir behind: %s (err=%v)", manifestDir, err)
+	}
+}

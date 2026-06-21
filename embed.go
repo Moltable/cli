@@ -29,6 +29,15 @@ import (
 //go:embed skills/*.md
 var skillFiles embed.FS
 
+// pluginManifest is the Claude Code plugin descriptor that namespaces
+// the bundled skills under the `moltable:` prefix
+// (e.g. `/moltable:auth-and-profiles`). Without this file in the
+// installed plugin directory, Claude Code's plugin loader either
+// skips the directory or loads the skills unnamespaced.
+//
+//go:embed .claude-plugin/plugin.json
+var pluginManifest []byte
+
 // Files returns the embedded skill markdown files as a map of bare
 // filename (e.g. "build-enrichment-table.md") -> raw markdown bytes.
 // The returned map is a fresh copy on every call so callers are free
@@ -39,6 +48,18 @@ var skillFiles embed.FS
 // directive is misconfigured (e.g. wrong glob) Files() returns an
 // empty map — the install command treats that as a fatal bug and
 // exits non-zero rather than silently writing nothing.
+// Manifest returns the embedded Claude Code plugin manifest bytes.
+// The skills install command writes these to
+// <plugin-root>/.claude-plugin/plugin.json so Claude Code's loader
+// can register the bundle under the `moltable:` prefix.
+func Manifest() []byte {
+	// Defensive copy so callers can't mutate the backing slice and
+	// affect future installs in the same process. Cheap (~500 bytes).
+	out := make([]byte, len(pluginManifest))
+	copy(out, pluginManifest)
+	return out
+}
+
 func Files() map[string][]byte {
 	out := map[string][]byte{}
 	entries, err := fs.ReadDir(skillFiles, "skills")
