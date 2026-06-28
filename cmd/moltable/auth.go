@@ -137,18 +137,23 @@ func (c *AuthLoginCmd) Run(kctx *kong.Context, root *CLI) error {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
+	// Fetch /v1/me with the brand-new key BEFORE saving so we can
+	// persist email + org_id alongside the API key. `profile list`
+	// then surfaces them without an extra round trip per profile.
+	// /v1/me failures are non-fatal: the key still saves; the profile
+	// just lands without email/org_id and renders "—" in profile list
+	// until the user re-auths.
+	email, orgID := fetchMeBestEffort(apiBase, res.APIKey, root.Dev)
+
 	cfg.AddProfile(profileName, config.Profile{
 		APIKey:  res.APIKey,
 		Created: time.Now().UTC(),
+		Email:   email,
+		OrgID:   orgID,
 	})
 	if err := saveConfig(root.Config, cfg); err != nil {
 		return err
 	}
-
-	// Fetch /v1/me with the brand-new key so the success message can
-	// confirm "Logged in as <email> (<org>)". Errors from /v1/me are
-	// non-fatal: the key is saved, the user can still use the CLI.
-	email, orgID := fetchMeBestEffort(apiBase, res.APIKey, root.Dev)
 
 	who := email
 	if who == "" {

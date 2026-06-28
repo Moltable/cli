@@ -84,11 +84,56 @@ func TestAuthLogin_HappyPath_WritesProfileAndSetsDefault(t *testing.T) {
 	if err != nil || cfg == nil {
 		t.Fatalf("LoadFrom: cfg=%v err=%v", cfg, err)
 	}
-	if got := cfg.Profiles["default"].APIKey; got != "molt_alice_key" {
-		t.Errorf("default profile key = %q", got)
+	p := cfg.Profiles["default"]
+	if p.APIKey != "molt_alice_key" {
+		t.Errorf("default profile key = %q", p.APIKey)
+	}
+	// Email + OrgID must be persisted from /v1/me alongside the key so
+	// `profile list` can surface them without re-authing every profile.
+	if p.Email != "alice@example.com" {
+		t.Errorf("default profile email = %q; want alice@example.com", p.Email)
+	}
+	if p.OrgID != "org_42" {
+		t.Errorf("default profile org_id = %q; want org_42", p.OrgID)
 	}
 	if cfg.DefaultProfile != "default" {
 		t.Errorf("DefaultProfile = %q; want 'default' on first login", cfg.DefaultProfile)
+	}
+}
+
+// TestAuthLogin_MeFailure_StillSavesKeyWithoutEmailOrOrg pins the
+// fallback: when /v1/me errors (network blip, transient 5xx), the API
+// key still saves so the CLI is usable; the profile just lands without
+// email/org_id and `profile list` renders them as "—" until next auth.
+func TestAuthLogin_MeFailure_StillSavesKeyWithoutEmailOrOrg(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	// Stub server returns 500 on /v1/me so fetchMeBestEffort fails.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/me" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv(envAPIBase, srv.URL)
+	withLoginRunner(t, fakeLoginRunner("molt_keyonly", nil))
+
+	code, _, _ := runCLI(t, "--config", cfgPath, "auth", "login")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+
+	cfg, err := config.LoadFrom(cfgPath)
+	if err != nil || cfg == nil {
+		t.Fatalf("LoadFrom: cfg=%v err=%v", cfg, err)
+	}
+	p := cfg.Profiles["default"]
+	if p.APIKey != "molt_keyonly" {
+		t.Errorf("key not saved: %q", p.APIKey)
+	}
+	if p.Email != "" || p.OrgID != "" {
+		t.Errorf("email/org_id leaked on /v1/me failure: %q / %q", p.Email, p.OrgID)
 	}
 }
 

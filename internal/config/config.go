@@ -15,10 +15,18 @@
 //	[profiles.work]
 //	api_key = "molt_..."
 //	created = 2026-06-17T10:00:00Z
+//	email = "alice@example.com"   # optional, populated by auth login
+//	org_id = "org_..."            # optional, populated by auth login
 //
 //	[profiles.personal]
 //	api_key = "molt_..."
 //	created = 2026-06-17T10:05:00Z
+//
+// `email` and `org_id` are written by `auth login` from the /v1/me
+// response so `profile list` can show which profile maps to which
+// org without re-authing. Profiles written before this was added
+// (or by future flows that skip /v1/me) leave the fields empty;
+// readers should fall back to an "unknown" placeholder.
 package config
 
 import (
@@ -44,9 +52,18 @@ const LockFileName = "config.toml.lock"
 const DirName = "moltable"
 
 // Profile is a single named credential entry.
+//
+// Email and OrgID are populated by `auth login` from the /v1/me response
+// so `profile list` can show which profile belongs to which org without
+// requiring a round-trip per profile. They are optional + omitempty for
+// backward-compat: profiles written before these fields existed (or by
+// flows that don't call /v1/me) simply leave them empty, and readers
+// render "—" to signal "unknown, re-auth to populate."
 type Profile struct {
 	APIKey  string    `toml:"api_key"`
 	Created time.Time `toml:"created"`
+	Email   string    `toml:"email,omitempty"`
+	OrgID   string    `toml:"org_id,omitempty"`
 }
 
 // Config is the on-disk shape of `config.toml`.

@@ -24,10 +24,16 @@ import (
 // profileSummary is the JSON shape `profile list --json` emits per
 // profile. Defined here (not in config package) so the wire contract
 // of the CLI doesn't drift if config.Profile gains internal fields.
+//
+// Email + OrgID are populated by `auth login` from /v1/me; profiles
+// authed before that flow existed render the fields empty (omitempty
+// in JSON; "—" in the human table).
 type profileSummary struct {
 	Name    string    `json:"name"`
 	Default bool      `json:"default"`
 	Created time.Time `json:"created"`
+	Email   string    `json:"email,omitempty"`
+	OrgID   string    `json:"org_id,omitempty"`
 }
 
 func (c *ProfileListCmd) Run(kctx *kong.Context, root *CLI) error {
@@ -47,6 +53,8 @@ func (c *ProfileListCmd) Run(kctx *kong.Context, root *CLI) error {
 			Name:    name,
 			Default: name == cfg.DefaultProfile,
 			Created: p.Created,
+			Email:   p.Email,
+			OrgID:   p.OrgID,
 		})
 	}
 
@@ -65,17 +73,25 @@ func (c *ProfileListCmd) Run(kctx *kong.Context, root *CLI) error {
 	}
 
 	tw := tabwriter.NewWriter(kctx.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tDEFAULT\tCREATED")
+	fmt.Fprintln(tw, "NAME\tDEFAULT\tEMAIL\tORG\tCREATED")
 	for _, p := range out {
 		def := ""
 		if p.Default {
 			def = "*"
 		}
+		email := p.Email
+		if email == "" {
+			email = "—"
+		}
+		org := p.OrgID
+		if org == "" {
+			org = "—"
+		}
 		created := ""
 		if !p.Created.IsZero() {
 			created = p.Created.UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, def, created)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", p.Name, def, email, org, created)
 	}
 	return tw.Flush()
 }

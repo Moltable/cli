@@ -94,6 +94,85 @@ func TestProfileList_JSONShape(t *testing.T) {
 	}
 }
 
+// TestProfileList_HumanShowsEmailAndOrg pins that the human table
+// includes EMAIL + ORG columns and the values render when populated.
+func TestProfileList_HumanShowsEmailAndOrg(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	now := time.Now().UTC().Truncate(time.Second)
+	seedProfiles(t, cfgPath, "work", map[string]config.Profile{
+		"work": {
+			APIKey: "molt_work_key", Created: now,
+			Email: "alice@example.com", OrgID: "org_42",
+		},
+	})
+
+	code, stdout, _ := runCLI(t, "--config", cfgPath, "profile", "list")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	out := stdout.String()
+	for _, want := range []string{"EMAIL", "ORG", "alice@example.com", "org_42"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q: %q", want, out)
+		}
+	}
+}
+
+// TestProfileList_HumanFallsBackToDashWhenMissing pins the back-compat
+// rendering for profiles authed before email/org_id persistence. The
+// fields are empty in the TOML; the human table renders "—" so the
+// user knows the profile predates the metadata (re-auth populates it).
+func TestProfileList_HumanFallsBackToDashWhenMissing(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	now := time.Now().UTC().Truncate(time.Second)
+	seedProfiles(t, cfgPath, "legacy", map[string]config.Profile{
+		"legacy": {APIKey: "molt_legacy_key", Created: now}, // no Email / OrgID
+	})
+
+	code, stdout, _ := runCLI(t, "--config", cfgPath, "profile", "list")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	// Two "—" cells in the legacy row (one per missing field).
+	if got := strings.Count(stdout.String(), "—"); got < 2 {
+		t.Errorf("expected at least 2 dash placeholders; got %d in %q", got, stdout.String())
+	}
+}
+
+// TestProfileList_JSONOmitsEmptyEmailOrgViaOmitempty pins the JSON
+// shape: when email/org_id are unset, the keys are omitted (no empty
+// strings in the response). When they're set, they're present.
+func TestProfileList_JSONOmitsEmptyEmailOrgViaOmitempty(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	now := time.Now().UTC().Truncate(time.Second)
+	seedProfiles(t, cfgPath, "work", map[string]config.Profile{
+		"work":   {APIKey: "k1", Created: now, Email: "a@b.c", OrgID: "org_z"},
+		"legacy": {APIKey: "k2", Created: now}, // no email/org
+	})
+
+	code, stdout, _ := runCLI(t, "--config", cfgPath, "profile", "list", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &arr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	byName := map[string]map[string]any{}
+	for _, p := range arr {
+		byName[p["name"].(string)] = p
+	}
+	if byName["work"]["email"] != "a@b.c" || byName["work"]["org_id"] != "org_z" {
+		t.Errorf("work profile missing email/org_id: %v", byName["work"])
+	}
+	if _, ok := byName["legacy"]["email"]; ok {
+		t.Errorf("legacy.email should be omitted via omitempty: %v", byName["legacy"])
+	}
+	if _, ok := byName["legacy"]["org_id"]; ok {
+		t.Errorf("legacy.org_id should be omitted via omitempty: %v", byName["legacy"])
+	}
+}
+
 // --- profile use -------------------------------------------------
 
 func TestProfileUse_SwitchesDefault(t *testing.T) {
