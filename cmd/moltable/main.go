@@ -9,6 +9,7 @@
 //	moltable profile  list | use | remove
 //	moltable workbook create | list
 //	moltable table    create | list | get | export
+//	moltable view     list | get | search
 //	moltable column   add | list
 //	moltable row      create | import
 //	moltable run      table | cell | watch
@@ -80,6 +81,7 @@ type CLI struct {
 	Auth     AuthCmd     `cmd:"" group:"core"       help:"Authenticate via browser handoff and manage credentials."`
 	Workbook WorkbookCmd `cmd:"" group:"core"       help:"Manage workbooks (top-level containers for tables)."`
 	Table    TableCmd    `cmd:"" group:"core"       help:"Create, inspect, and export tables."`
+	View     ViewCmd     `cmd:"" group:"core"       help:"List views on a table and search cells inside a view."`
 	Column   ColumnCmd   `cmd:"" group:"core"       help:"Add and list columns on a table."`
 	Row      RowCmd      `cmd:"" group:"core"       help:"Create rows and import data into tables."`
 	Run      RunCmd      `cmd:"" group:"core"       help:"Trigger executions over tables, rows, or single cells."`
@@ -236,6 +238,53 @@ type TableExportCmd struct {
 	Out    string `name:"out" short:"o" help:"Write to this path instead of stdout."`
 	JSON   bool   `name:"json" help:"Emit a machine-readable summary instead of the human one."`
 	JQ     string `name:"jq" help:"Filter --json output through this jq expression."`
+}
+
+// --- View ----------------------------------------------------------
+
+// ViewCmd groups the view verbs. Verb bodies live in view.go.
+//
+// Why `view search` and not `table search`: the search is scoped to a
+// view's filter, not the bare table — the view is the unit of work the
+// caller addresses, and parking the verb under `view` keeps the noun
+// hierarchy aligned with the data model (view → cells, not table →
+// cells). It also leaves `moltable search …` open for the future home-
+// search wrapper (workbook/folder/table names, distinct endpoint).
+type ViewCmd struct {
+	List   ViewListCmd   `cmd:"" help:"List saved views on a table."`
+	Get    ViewGetCmd    `cmd:"" help:"Fetch a single view by id."`
+	Search ViewSearchCmd `cmd:"" help:"Substring search across cells inside a view's filtered row set."`
+}
+
+// ViewListCmd wires `moltable view list --table <id>`. Body in view.go.
+type ViewListCmd struct {
+	Table string `name:"table" required:"" help:"Table ID whose views to list."`
+	JSON  bool   `name:"json" help:"Emit JSON instead of human-readable output."`
+	JQ    string `name:"jq" help:"Filter --json output through this jq expression."`
+}
+
+// ViewGetCmd wires `moltable view get --table <id> <viewId>`. Body in view.go.
+type ViewGetCmd struct {
+	Table string `name:"table" required:"" help:"Table ID the view belongs to."`
+	ID    string `arg:"" name:"id" help:"View ID."`
+	JSON  bool   `name:"json" help:"Emit JSON instead of human-readable output."`
+	JQ    string `name:"jq" help:"Filter --json output through this jq expression."`
+}
+
+// ViewSearchCmd wires `moltable view search --table <id> --view <id> <query>
+// [--limit N]`. Body in view.go.
+//
+// `query` is a positional so the most common shape is the shortest:
+// `moltable view search --table tb_x --view vw_y linkedin`. The server
+// enforces a 512-rune cap and rejects NUL; the CLI re-checks for empty
+// to fail fast before the round-trip.
+type ViewSearchCmd struct {
+	Table string `name:"table" required:"" help:"Table ID the view belongs to."`
+	View  string `name:"view" required:"" help:"View ID to scope the search to (use 'view list' to enumerate)."`
+	Query string `arg:"" name:"query" help:"Substring to search for (case-insensitive, max 512 chars)."`
+	Limit int    `name:"limit" help:"Reserved for future per-page semantics; server returns up to 5000 matched cells regardless."`
+	JSON  bool   `name:"json" help:"Emit JSON instead of human-readable output."`
+	JQ    string `name:"jq" help:"Filter --json output through this jq expression."`
 }
 
 // --- Column --------------------------------------------------------
